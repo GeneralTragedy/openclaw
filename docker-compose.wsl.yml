@@ -1,0 +1,138 @@
+# OpenClaw on Docker under WSL 2, with all state on one named volume.
+#
+# Every OpenClaw file lives in the `openclaw-data` volume mounted at
+# /home/node: config and state (~/.openclaw), the agent workspace
+# (~/.openclaw/workspace), and auth-profile secrets (~/.config/openclaw).
+# Keeping state inside Docker's ext4 storage avoids slow, permission-lossy
+# bind mounts from the Windows filesystem (/mnt/c/...).
+#
+# Run from a WSL 2 shell (Docker Desktop with WSL integration, or Docker
+# Engine installed inside the distro):
+#
+#   export OPENCLAW_GATEWAY_TOKEN="$(openssl rand -hex 32)"   # or put it in .env
+#   docker compose -f docker-compose.wsl.yml pull
+#   docker compose -f docker-compose.wsl.yml run --rm openclaw-onboard
+#   docker compose -f docker-compose.wsl.yml up -d openclaw-gateway
+#   docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --json
+#
+# Then open the printed `browserUrl` (a one-time pairing link, valid for ten
+# minutes) in a Windows browser; WSL forwards localhost. Alternatively open
+# http://localhost:18789/ and paste OPENCLAW_GATEWAY_TOKEN into Settings.
+#
+# Back up or inspect the volume:
+#   docker run --rm -v openclaw-data:/data -v "$PWD":/backup alpine \
+#     tar czf /backup/openclaw-data.tgz -C /data .
+#
+# Keep this checkout in the WSL filesystem (~/...), not under /mnt/c.
+
+x-openclaw-env: &openclaw-env
+  HOME: /home/node
+  OPENCLAW_HOME: /home/node
+  TERM: xterm-256color
+  # Pinned container paths: host values in .env must not leak into runtime
+  # path resolution inside the container (#77436).
+  OPENCLAW_STATE_DIR: /home/node/.openclaw
+  OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+  OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+  OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+  OPENCLAW_GATEWAY_PORT: "18789"
+  OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+  OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: ${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}
+  OPENCLAW_DISABLE_BONJOUR: ${OPENCLAW_DISABLE_BONJOUR:-}
+  TZ: ${OPENCLAW_TZ:-UTC}
+
+x-openclaw-base: &openclaw-base
+  image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+  env_file:
+    - path: .env
+      required: false
+  user: "1000:1000"
+  cap_drop:
+    - NET_RAW
+    - NET_ADMIN
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  volumes:
+    - openclaw-data:/home/node
+
+services:
+  # One-shot: make sure the volume's OpenClaw directories exist and belong to
+  # uid 1000 (the image's `node` user), even if the volume was created empty
+  # or populated by another tool. `install -d` only chowns the paths it is
+  # given, so every intermediate directory is listed explicitly.
+  openclaw-volume-init:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -d -o 1000 -g 1000 -m 0755 /home/node/.config &&
+        install -d -o 1000 -g 1000 -m 0700 /home/node/.openclaw
+        /home/node/.openclaw/workspace /home/node/.config/openclaw
+        /home/node/.openclaw/identity /home/node/.openclaw/agents
+        /home/node/.openclaw/agents/main /home/node/.openclaw/agents/main/agent
+        /home/node/.openclaw/agents/main/sessions &&
+        chown 1000:1000 /home/node
+    network_mode: none
+    volumes:
+      - openclaw-data:/home/node
+
+  # One-shot onboarding and Docker gateway defaults. Run before the first
+  # `up`; safe to rerun. Uses its own container so it does not need the
+  # gateway's network namespace.
+  openclaw-onboard:
+    <<: *openclaw-base
+    environment:
+      <<: *openclaw-env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        node dist/index.js onboard --mode local --no-install-daemon
+        --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN
+        --skip-ui --suppress-gateway-token-output &&
+        node dist/index.js config set --batch-json
+        '[{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789"]}]'
+    stdin_open: true
+    tty: true
+    depends_on:
+      openclaw-volume-init:
+        condition: service_completed_successfully
+
+  openclaw-gateway:
+    <<: *openclaw-base
+    environment:
+      <<: *openclaw-env
+    extra_hosts:
+      # Reach LM Studio/Ollama on the Windows or WSL host.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+      - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
+    restart: unless-stopped
+    command: ["node", "dist/index.js", "gateway", "--bind", "lan", "--port", "18789"]
+    healthcheck:
+      test: ["CMD", "node", "dist/docker-healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      openclaw-volume-init:
+        condition: service_completed_successfully
+
+  openclaw-cli:
+    <<: *openclaw-base
+    network_mode: "service:openclaw-gateway"
+    environment:
+      <<: *openclaw-env
+      BROWSER: echo
+    stdin_open: true
+    tty: true
+    entrypoint: ["node", "dist/index.js"]
+    depends_on:
+      - openclaw-gateway
+
+volumes:
+  openclaw-data:
+    name: ${OPENCLAW_DATA_VOLUME:-openclaw-data}
