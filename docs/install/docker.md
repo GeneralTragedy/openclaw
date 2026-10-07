@@ -225,6 +225,19 @@ automatically.
 Run `docker compose` from the repo root. If you enabled `OPENCLAW_EXTRA_MOUNTS` or `OPENCLAW_HOME_VOLUME`, the setup script writes `docker-compose.extra.yml`; include it after any `docker-compose.override.yml` you maintain yourself, e.g. `-f docker-compose.yml -f docker-compose.override.yml -f docker-compose.extra.yml`.
 </Note>
 
+### Windows (WSL 2) with a single data volume
+
+`docker-compose.wsl.yml` is a standalone Compose file for Docker under WSL 2. It uses the prebuilt `ghcr.io/openclaw/openclaw:latest` image (override with `OPENCLAW_IMAGE`) and keeps every OpenClaw file on one named volume, `openclaw-data`, mounted at `/home/node`. Config and state (`~/.openclaw`), the workspace, and auth-profile secrets (`~/.config/openclaw`) all persist there, owned by uid 1000, so nothing is bind-mounted from the Windows filesystem.
+
+```bash
+export OPENCLAW_GATEWAY_TOKEN="$(openssl rand -hex 32)"   # or set it in .env
+docker compose -f docker-compose.wsl.yml run --rm openclaw-onboard
+docker compose -f docker-compose.wsl.yml up -d openclaw-gateway
+docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --no-open
+```
+
+Run these from a WSL shell with the checkout on the Linux filesystem (`~/...`, not `/mnt/c/...`). Open `http://localhost:18789/` from Windows and paste the token. Set `OPENCLAW_DATA_VOLUME` to use a different volume name. If you change `OPENCLAW_GATEWAY_PORT`, update `gateway.controlUi.allowedOrigins` to match the new host port.
+
 ### Upgrading container images
 
 When you replace the OpenClaw image but keep the same mounted state/config, the
