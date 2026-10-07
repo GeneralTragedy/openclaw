@@ -13,10 +13,11 @@
 #   docker compose -f docker-compose.wsl.yml pull
 #   docker compose -f docker-compose.wsl.yml run --rm openclaw-onboard
 #   docker compose -f docker-compose.wsl.yml up -d openclaw-gateway
-#   docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --no-open
+#   docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --json
 #
-# Then open http://localhost:18789/ in a Windows browser (WSL forwards
-# localhost) and paste the gateway token into Settings.
+# Then open the printed `browserUrl` (a one-time pairing link, valid for ten
+# minutes) in a Windows browser; WSL forwards localhost. Alternatively open
+# http://localhost:18789/ and paste OPENCLAW_GATEWAY_TOKEN into Settings.
 #
 # Back up or inspect the volume:
 #   docker run --rm -v openclaw-data:/data -v "$PWD":/backup alpine \
@@ -58,7 +59,8 @@ x-openclaw-base: &openclaw-base
 services:
   # One-shot: make sure the volume's OpenClaw directories exist and belong to
   # uid 1000 (the image's `node` user), even if the volume was created empty
-  # or populated by another tool.
+  # or populated by another tool. `install -d` only chowns the paths it is
+  # given, so every intermediate directory is listed explicitly.
   openclaw-volume-init:
     image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
     user: "0:0"
@@ -68,7 +70,8 @@ services:
         install -d -o 1000 -g 1000 -m 0755 /home/node/.config &&
         install -d -o 1000 -g 1000 -m 0700 /home/node/.openclaw
         /home/node/.openclaw/workspace /home/node/.config/openclaw
-        /home/node/.openclaw/identity /home/node/.openclaw/agents/main/agent
+        /home/node/.openclaw/identity /home/node/.openclaw/agents
+        /home/node/.openclaw/agents/main /home/node/.openclaw/agents/main/agent
         /home/node/.openclaw/agents/main/sessions &&
         chown 1000:1000 /home/node
     network_mode: none

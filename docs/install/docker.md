@@ -233,10 +233,10 @@ Run `docker compose` from the repo root. If you enabled `OPENCLAW_EXTRA_MOUNTS` 
 export OPENCLAW_GATEWAY_TOKEN="$(openssl rand -hex 32)"   # or set it in .env
 docker compose -f docker-compose.wsl.yml run --rm openclaw-onboard
 docker compose -f docker-compose.wsl.yml up -d openclaw-gateway
-docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --no-open
+docker compose -f docker-compose.wsl.yml run --rm openclaw-cli dashboard --json
 ```
 
-Run these from a WSL shell with the checkout on the Linux filesystem (`~/...`, not `/mnt/c/...`). Open `http://localhost:18789/` from Windows and paste the token. Set `OPENCLAW_DATA_VOLUME` to use a different volume name. If you change `OPENCLAW_GATEWAY_PORT`, update `gateway.controlUi.allowedOrigins` to match the new host port.
+Run these from a WSL shell with the checkout on the Linux filesystem (`~/...`, not `/mnt/c/...`). Open the printed `browserUrl` from Windows within ten minutes, or open `http://localhost:18789/` and paste the token into Settings. Set `OPENCLAW_DATA_VOLUME` to use a different volume name. If you change `OPENCLAW_GATEWAY_PORT`, update `gateway.controlUi.allowedOrigins` to match the new host port.
 
 ### Upgrading container images
 
